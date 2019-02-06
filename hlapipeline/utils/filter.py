@@ -7,11 +7,14 @@ can or should be reconciled against an astrometric catalog and, for multiple ima
 to create a mosaic.
 
 """
+import logging
+from stsci.tools import logutil, fileutil
 from astropy.io.fits import getheader
 from astropy.table import Table
 import math
 import pdb
-__all__ = ['analyze_data']
+import drizzlepac
+__all__ = ['analyze_data', 'generate_msg', 'init_logging']
 
 from enum import Enum
  
@@ -19,6 +22,8 @@ from enum import Enum
 # as described through FITS keywords
 class Messages(Enum):
     OK, WARN, NOPROC = 1, -1, -2
+
+DEFAULT_LOGNAME = 'alignimages'
  
 def analyze_data(inputFileList, **kwargs):
     """

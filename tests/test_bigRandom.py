@@ -46,12 +46,12 @@ class TestRandomAlignMosaic(BaseHLATest):
             selected fields (aka datasets) from a input ascii file (CSV)
             using the new algorithms developed for producing the HLA products.
         """
-        inputListFiles = ['ACSList50R_v2.csv', 'WFC3List50R_v2.csv']
-        #inputListFiles = ['ACSList2.csv']
+        #inputListFiles = ['ACSList50R_v2.csv', 'WFC3List50R_v2.csv']
+        inputListFiles = ['ACSList2.csv']
 
         # Desired number of random entries for testing from each input CSV
-        inputNumEntries = 50
-        #inputNumEntries = 3
+        #inputNumEntries = 50
+        inputNumEntries = 1
 
         # Seed for random number generator
         inputSeedValue = 1

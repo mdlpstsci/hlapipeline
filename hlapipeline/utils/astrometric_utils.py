@@ -52,6 +52,11 @@ from drizzlepac.tweakutils import build_xy_zeropoint
 
 from hlapipeline.utils import bitmask
 
+from stsci.tools import fileutil, logutil
+from hlapipeline.utils import filter
+#filter.init_logging(__name__, level=logging.NOTSET)
+log = logutil.create_logger(__name__, level=logutil.logging.NOTSET)
+
 ASTROMETRIC_CAT_ENVVAR = "ASTROMETRIC_CATALOG_URL"
 DEF_CAT_URL = 'http://gsss.stsci.edu/webservices'
 
@@ -602,6 +607,7 @@ def generate_source_catalog(image, **kwargs):
 
     """
     if not isinstance(image, pf.HDUList):
+        log.error("Input {} not fits.HDUList object".format(image))
         raise ValueError("Input {} not fits.HDUList object".format(image))
     dqname = kwargs.get('dqname','DQ')
     output = kwargs.get('output',None)

@@ -11,12 +11,14 @@ from astropy.coordinates import SkyCoord, Angle
 from astropy import units as u
 from collections import OrderedDict
 from drizzlepac import updatehdr
+from drizzlepac import util as drizutil
 import glob
 import math
 import numpy as np
 import os
 import pdb
-from stsci.tools import fileutil
+import logging
+from stsci.tools import fileutil, logutil
 from stwcs.wcsutil import HSTWCS
 import sys
 import tweakwcs
@@ -26,10 +28,23 @@ try:
     from hlapipeline.utils import filter
     from hlapipeline.utils import get_git_rev_info
 except:
-    from utils import astrometric_utils as amutils
-    from utils import astroquery_utils as aqutils
-    from utils import filter
-    from utils import get_git_rev_info
+    from hlapipeline.utils import astrometric_utils as amutils
+    from hlapipeline.utils import astroquery_utils as aqutils
+    from hlapipeline.utils import filter
+    from hlapipeline.utils import get_git_rev_info
+
+# Does not work - try this once code moved to drizzlepac 
+# as wall as call to with_logging
+#
+log = logutil.create_logger(__name__, level=logutil.logging.NOTSET)
+
+# This works with all alone with writes stdout and log to file
+# Only print goes to stdout
+#drizutil.init_logging('alignimages', level=logging.NOTSET)
+
+__version__ = 0.1
+__version_date__ = ' 01-Feb-2019'
+#log.info('*** HLAPIPELINE Processing Version '+str(__version__)+__version_date__+' ***\n')
 
 MIN_CATALOG_THRESHOLD = 3
 MIN_OBSERVABLE_THRESHOLD = 10
@@ -103,7 +118,7 @@ def check_and_get_data(input_list,**pars):
 
     if len(filelist) > 0: totalInputList = sorted(
         list(set(totalInputList)))  # remove duplicate list elements, sort resulting list of unique elements
-    print("TOTAL INPUT LIST: ",totalInputList)
+    log.info("TOTAL INPUT LIST: %s" % totalInputList)
     # TODO: add trap to deal with non-existent (incorrect) rootnames
     # TODO: Address issue about how the code will retrieve association information if there isn't a local file to get 'ASN_ID' header info
     return(totalInputList)
@@ -128,7 +143,7 @@ def convert_string_tf_to_boolean(invalue):
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-
+@drizutil.with_logging
 def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False, print_fit_parameters=True,
                     print_git_info=False):
     """Main calling function.
@@ -162,9 +177,11 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
     # Define astrometric catalog list in priority order
     catalogList = ['GAIADR2', 'GSC241']
 
+    log.info('*** HLAPIPELINE Processing Version '+str(__version__)+__version_date__+' ***\n')
+
     # 0: print git info
     if print_git_info:
-        print("-------------------- STEP 0: Display Git revision info  --------------------")
+        log.debug("-------------------- STEP 0: Display Git revision info  --------------------")
         full_path = os.path.dirname(__file__)+"/utils"
         repo_path=None
         if "hlapipeline/hlapipeline" in full_path:
@@ -177,21 +194,21 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
         if repo_path:
             get_git_rev_info.print_rev_id(repo_path) # Display git repository information
         else:
-            print("WARNING: Unable to display Git repository revision information.")
+            log.warning("WARNING: Unable to display Git repository revision information.")
 
     # 1: Interpret input data and optional parameters
-    print("-------------------- STEP 1: Get data --------------------")
+    log.debug("-------------------- STEP 1: Get data --------------------")
     zeroDT = startingDT = datetime.datetime.now()
-    print(str(startingDT))
+    log.debug(str(startingDT))
     imglist = check_and_get_data(input_list, archive=archive, clobber=clobber)
     print("\nSUCCESS")
 
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 1]: {} sec'.format(deltaDT))
+    log.debug('Processing time of [STEP 1]: {} sec'.format(deltaDT))
     startingDT = currentDT
     # 2: Apply filter to input observations to insure that they meet minimum criteria for being able to be aligned
-    print("-------------------- STEP 2: Filter data --------------------")
+    log.debug("-------------------- STEP 2: Filter data --------------------")
     filteredTable = filter.analyze_data(imglist)
 
     # Check the table to determine if there is any viable data to be aligned.  The
@@ -199,7 +216,7 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
     # for alignment purposes.  For filtered data, 'doProcess=0' and 'status=9999' in the table
     # (the status value by default), so there is no need to update the filteredTable here.
     if filteredTable['doProcess'].sum() == 0:
-        print("No viable images in filtered table - no processing done.\n")
+        log.warning("No viable images in filtered table - no processing done.\n")
         return(filteredTable)
 
     # Get the list of all "good" files to use for the alignment
@@ -209,20 +226,20 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
 
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 2]: {} sec'.format(deltaDT))
+    log.debug('Processing time of [STEP 2]: {} sec'.format(deltaDT))
     startingDT = currentDT
     # 3: Build WCS for full set of input observations
-    print("-------------------- STEP 3: Build WCS --------------------")
+    log.debug("-------------------- STEP 3: Build WCS --------------------")
     refwcs = amutils.build_reference_wcs(processList)
     print("\nSUCCESS")
 
 
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 3]: {} sec'.format(deltaDT))
+    log.debug('Processing time of [STEP 3]: {} sec'.format(deltaDT))
     startingDT = currentDT
     # 4: Extract catalog of observable sources from each input image
-    print("-------------------- STEP 4: Source finding --------------------")
+    log.debug("-------------------- STEP 4: Source finding --------------------")
     extracted_sources = generate_source_catalogs(processList,
                                                  centering_mode='starfind',
                                                  nlargest=MAX_SOURCES_PER_CHIP)
@@ -239,13 +256,14 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
         filteredTable[index]['foundSources'] = total_num_sources
 
         if total_num_sources < MIN_OBSERVABLE_THRESHOLD:
-            print("Not enough sources ({}) found in image {}".format(total_num_sources,imgname))
+            log.warning("Not enough sources ({}) found in image {}".format(total_num_sources,imgname))
             filteredTable[index]['status'] = 1
             return(filteredTable)
+
     print("\nSUCCESS")
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 4]: {} sec'.format(deltaDT))
+    log.debug('Processing time of [STEP 4]: {} sec'.format(deltaDT))
     startingDT = currentDT
     # 5: Retrieve list of astrometric sources from database
 
@@ -263,27 +281,27 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
     best_fit_rms = -99999.0
     fit_algorithm_list= [match_2dhist_fit,match_default_fit]
     for catalogIndex in range(0, len(catalogList)): #loop over astrometric catalog
-        print("-------------------- STEP 5: Detect astrometric sources --------------------")
-        print("Astrometric Catalog: ",catalogList[catalogIndex])
+        log.debug("-------------------- STEP 5: Detect astrometric sources --------------------")
+        log.debug("Astrometric Catalog: %s" % catalogList[catalogIndex])
         reference_catalog = generate_astrometric_catalog(processList, catalog=catalogList[catalogIndex])
 
         currentDT = datetime.datetime.now()
         deltaDT = (currentDT - startingDT).total_seconds()
-        print('Processing time of [STEP 5]: {} sec'.format(deltaDT))
+        log.debug('Processing time of [STEP 5]: {} sec'.format(deltaDT))
         startingDT = currentDT
 
         if len(reference_catalog) < MIN_CATALOG_THRESHOLD:
-            print("Not enough sources found in catalog " + catalogList[catalogIndex])
+            log.warning("Not enough sources found in catalog " + catalogList[catalogIndex])
             if catalogIndex < len(catalogList) -1:
-                print("Try again with other catalog")
+                log.warning("Try again with other catalog")
             else:
-                print("ERROR! No astrometric sources found in any catalog. Exiting...") #bail out if not enough sources can be found any of the astrometric catalogs
+                log.error("ERROR! No astrometric sources found in any catalog. Exiting...") #bail out if not enough sources can be found any of the astrometric catalogs
                 filteredTable['status'][:] = 1
                 return (filteredTable)
         else:
-            print("-------------------- STEP 5b: Cross matching and fitting --------------------")
+            log.debug("-------------------- STEP 5b: Cross matching and fitting --------------------")
             for algorithm_name in fit_algorithm_list: #loop over fit algorithm type
-                print("------------------ Catalog {} matched using {} ------------------ ".format(catalogList[catalogIndex],algorithm_name.__name__))
+                log.debug("------------------ Catalog {} matched using {} ------------------ ".format(catalogList[catalogIndex],algorithm_name.__name__))
 
                 #execute the correct fitting/matching algorithm
                 fit_rms, fit_num = algorithm_name(imglist, reference_catalog, print_fit_parameters=print_fit_parameters)
@@ -306,14 +324,14 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
 
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 5b]: {} sec'.format(deltaDT))
+    log.debug('Processing time of [STEP 5b]: {} sec'.format(deltaDT))
     startingDT = currentDT
     # 6: Populate the filteredTable
-    print("-------------------- STEP 6: Collect up information and populate the filtered table --------------------")
+    log.debug("-------------------- STEP 6: Collect up information and populate the filtered table --------------------")
     if best_fit_rms > 0 and best_fit_rms < MAX_FIT_RMS:
-        print("The fitting process was successful with a best fit total rms of {} mas".format(best_fit_rms))
+        log.info("The fitting process was successful with a best fit total rms of {} mas".format(best_fit_rms))
     else:
-        print("The fitting process was unsuccessful with a best fit total rms of {} mas".format(best_fit_rms))
+        log.info("The fitting process was unsuccessful with a best fit total rms of {} mas".format(best_fit_rms))
 
     if best_fit_rms > 0 and best_fit_rms < MAX_FIT_LIMIT:
         # update to the meta information with the lowest rms if it is reasonable
@@ -345,20 +363,21 @@ def perform_align(input_list, archive=False, clobber=False, update_hdr_wcs=False
 
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 6]: {} sec'.format(deltaDT))
+    log.debug('Processing time of [STEP 6]: {} sec'.format(deltaDT))
     startingDT = currentDT
     # 7: Write new fit solution to input image headers
-    print("-------------------- STEP 7: Update image headers with new WCS information --------------------")
+    log.debug("-------------------- STEP 7: Update image headers with new WCS information --------------------")
     if best_fit_rms > 0 and update_hdr_wcs:
         update_image_wcs_info(imglist, processList)
         print("\nSUCCESS")
     else:
         print("\n STEP SKIPPED")
+        log.debug("*** STEP SKIPPED *** ")
 
     currentDT = datetime.datetime.now()
     deltaDT = (currentDT - startingDT).total_seconds()
-    print('Processing time of [STEP 7]: {} sec'.format(deltaDT))
-    print('TOTAL Processing time of {} sec'.format((currentDT- zeroDT).total_seconds()))
+    log.debug('Processing time of [STEP 7]: {} sec'.format(deltaDT))
+    log.debug('TOTAL Processing time of {} sec'.format((currentDT- zeroDT).total_seconds()))
     return (filteredTable)
 
 def match_default_fit(imglist, reference_catalog, print_fit_parameters=True):
@@ -423,7 +442,8 @@ def match_2dhist_fit(imglist, reference_catalog, print_fit_parameters=True):
         Number of sources used to generate visit level FIT and `fit_rms`
 
     """
-    print("-------------------- STEP 5b: (match_2dhist_fit) Cross matching and fitting --------------------")
+    #print("-------------------- STEP 5b: (match_2dhist_fit) Cross matching and fitting --------------------")
+    log.debug('------------------- STEP 5b: (match_2dhist_fit) Cross matching and fitting --------------------')
     # Specify matching algorithm to use
     match = tweakwcs.TPMatch(searchrad=75, separation=0.1,
                              tolerance=2.0, use2dhist=True)
@@ -473,32 +493,48 @@ def determine_fit_quality(imglist, print_fit_parameters=True):
         image_name = item.meta['name']
         #Handle fitting failures (no matches found)
         if item.meta['tweakwcs_info']['status'].startswith("FAILED") == True:
-                print("No cross matches found in any catalog for {} - no processing done.".format(image_name))
+                #print("No cross matches found in any catalog for {} - no processing done.".format(image_name))
+                log.warning('No cross matches found in any catalog for {} - no processing done.'.format(image_name))
                 continue
         fit_rms_val = item.meta['tweakwcs_info']['FIT_RMS']
         max_rms_val = item.meta['tweakwcs_info']['TOTAL_RMS']
         num_xmatches = item.meta['tweakwcs_info']['nmatches']
         if num_xmatches < MIN_CROSS_MATCHES:
             if catalogIndex < numCatalogs-1:
-                print("Not enough cross matches found between astrometric catalog and sources found in {}".format(image_name))
+                #print("Not enough cross matches found between astrometric catalog and sources found in {}".format(image_name))
+                log.warning('Not enough cross matches found between astrometric catalog and sources found in {}'.format(image_name))
                 continue
-        print('RESULTS FOR {} Chip {}: FIT_RMS = {} mas, TOTAL_RMS = {} mas, NUM =  {}'.format(image_name, item.meta['chip'], fit_rms_val, max_rms_val, num_xmatches))
+        #print('RESULTS FOR {} Chip {}: FIT_RMS = {} mas, TOTAL_RMS = {} mas, NUM =  {}'.format(image_name, item.meta['chip'], fit_rms_val, max_rms_val, num_xmatches))
+        log.info('RESULTS FOR {} Chip {}: FIT_RMS = {} mas, TOTAL_RMS = {} mas, NUM =  {}'.format(image_name, item.meta['chip'], fit_rms_val, max_rms_val, num_xmatches))
         # print fit params to screen
         if print_fit_parameters:
+            """
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIT PARAMETERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print("image: {}".format(image_name))
             print("chip: {}".format(item.meta['chip']))
             print("group_id: {}".format(item.meta['group_id']))
+            """
+            log.debug("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIT PARAMETERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            log.debug("image: {}".format(image_name))
+            log.debug("chip: {}".format(item.meta['chip']))
+            log.debug("group_id: {}".format(item.meta['group_id']))
             for tweakwcs_info_key in tweakwcs_info_keys:
                 if not tweakwcs_info_key.startswith("matched"):
-                    print("{} : {}".format(tweakwcs_info_key,item.meta['tweakwcs_info'][tweakwcs_info_key]))
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    #print("{} : {}".format(tweakwcs_info_key,item.meta['tweakwcs_info'][tweakwcs_info_key]))
+                    log.debug("{} : {}".format(tweakwcs_info_key,item.meta['tweakwcs_info'][tweakwcs_info_key]))
+            #print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            log.debug("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     if max_rms_val > MAX_FIT_RMS:
+        """
         print("Total fit RMS value = {} mas greater than the maximum threshold value {}.".format(max_rms_val, MAX_FIT_RMS))
         print("Try again with the next catalog")
+        """
+        log.info("Total fit RMS value = {} mas greater than the maximum threshold value {}.".format(max_rms_val, MAX_FIT_RMS))
+        log.info("Try again with the next catalog")
     else:
-        print("Fit calculations successful.")
+        #print("Fit calculations successful.")
+        log.info("Fit calculations successful.")
 
     return max_rms_val, num_xmatches
 # ----------------------------------------------------------------------------------------------------------------------
@@ -526,7 +562,8 @@ def generate_astrometric_catalog(imglist, **pars):
     if len(out_catalog) > 0:
         catalog_filename = "refcatalog.cat"
         out_catalog.write(catalog_filename, format="ascii.fast_commented_header")
-        print("Wrote reference catalog {}.".format(catalog_filename))
+        #print("Wrote reference catalog {}.".format(catalog_filename))
+        log.debug("Wrote reference catalog {}.".format(catalog_filename))
 
     return(out_catalog)
 
@@ -552,7 +589,8 @@ def generate_source_catalogs(imglist, **pars):
     output = pars.get('output', False)
     sourcecatalogdict = {}
     for imgname in imglist:
-        print("Image name: ", imgname)
+        #print("Image name: ", imgname)
+        log.debug("Image name: {}".format(imgname))
 
         sourcecatalogdict[imgname] = {}
 
@@ -571,8 +609,10 @@ def generate_source_catalogs(imglist, **pars):
                 sourcecatalogdict[imgname]["params"] = detector_pars
             else:
                 sys.exit("ERROR! Unrecognized detector '{}'. Exiting...".format(detector))
+                log.error("ERROR! Unrecognized detector '{}'. Exiting...".format(detector))
         else:
             sys.exit("ERROR! Unrecognized instrument '{}'. Exiting...".format(instrument))
+            log.error("ERROR! Unrecognized instrument '{}'. Exiting...".format(instrument))
 
         # Identify sources in image, convert coords from chip x, y form to reference WCS sky RA, Dec form.
         imgwcs = HSTWCS(imghdu, 1)
@@ -590,7 +630,8 @@ def generate_source_catalogs(imglist, **pars):
                 regfilename = "{}_sci{}_src.reg".format(imgroot, chip)
                 out_table = Table(sourcecatalogdict[imgname]["catalog_table"][chip])
                 out_table.write(regfilename, include_names=["xcentroid", "ycentroid"], format="ascii.fast_commented_header")
-                print("Wrote region file {}\n".format(regfilename))
+                #print("Wrote region file {}\n".format(regfilename))
+                log.debug("Wrote region file {}\n".format(regfilename))
         imghdu.close()
     return(sourcecatalogdict)
 
@@ -616,11 +657,11 @@ def update_image_wcs_info(tweakwcs_output,imagelist):
     """
     imgctr = 0
     for item in tweakwcs_output:
-        #print('YYYYYYYYY',item.wcs.pscale)
         if item.meta['chip'] == 1:  # to get the image name straight regardless of the number of chips
             image_name = imagelist[imgctr]
             if imgctr > 0: #close previously opened image
-                print("CLOSE {}".format(hdulist[0].header['FILENAME'])) #TODO: Remove before deployment
+                #print("CLOSE {}".format(hdulist[0].header['FILENAME'])) #TODO: Remove before deployment
+                log.debug("CLOSE {}".format(hdulist[0].header['FILENAME'])) #TODO: Remove before deployment
                 hdulist.flush()
                 hdulist.close()
             hdulist = fits.open(image_name, mode='update')
@@ -630,7 +671,8 @@ def update_image_wcs_info(tweakwcs_output,imagelist):
             imgctr += 1
         updatehdr.update_wcs(hdulist, sciExtDict["{}".format(item.meta['chip'])], item.wcs, wcsname='TWEAKDEV', reusename=True, verbose=True) #TODO: May want to settle on a better name for 'wcsname'
         print()
-    print("CLOSE {}".format(hdulist[0].header['FILENAME'])) #TODO: Remove before deployment
+    #print("CLOSE {}".format(hdulist[0].header['FILENAME'])) #TODO: Remove before deployment
+    log.debug("CLOSE {}".format(hdulist[0].header['FILENAME'])) #TODO: Remove before deployment
     hdulist.flush() #close last image
     hdulist.close()
 
